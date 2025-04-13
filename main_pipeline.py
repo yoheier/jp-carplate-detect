@@ -11,8 +11,8 @@ from label_definitions import namesA
 
 # パス設定
 image_path = "./RX-8_Plate.jpg"
-modelB_path = "./yolov7_platedetect_ModelB.onnx"
-modelA_path = "./yolov5_platedetail_ModelA.onnx"
+modelB_path = "./yolov5s_carplate_ditect_ModelB.onnx"
+modelA_path = "./yolov5s_carplate_detail_ModelA.onnx"
 output_dir = Path("./results")
 output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,6 +71,7 @@ def draw_result(original_image, plate_bbox, plate_details):
 
 def process_frame(frame, sessionA, sessionB):
     print("[INFO] Detecting plates...")
+    plate_text = ""  
     plate_bboxes = detect_plate(sessionB, frame)
 
     if not plate_bboxes:
@@ -90,7 +91,7 @@ def process_frame(frame, sessionA, sessionB):
 
         if not plate_details:
             print("[INFO] No plate details detected, skipping drawing bbox.")
-            continue  # 追加: 詳細がない場合はスキップ
+            #continue  # 追加: 詳細がない場合はスキップ
 
         # 座標補正: plate_crop 基準 → 元画像基準
         adjusted_plate_details = []
