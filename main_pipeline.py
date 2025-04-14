@@ -1,4 +1,6 @@
 import time
+import os
+
 import cv2
 from pathlib import Path
 import onnxruntime as ort
@@ -18,6 +20,17 @@ modelA_path = "./yolov5s_carplate_detail_ModelA.onnx"
 output_dir = Path("./results")
 output_dir.mkdir(parents=True, exist_ok=True)
 
+# 環境変数からしきい値取得（デフォルト値あり）
+MODEL_A_CONF_THRESHOLD = float(os.getenv("MODEL_A_CONF_THRESHOLD", 0.37))
+MODEL_A_IOU_THRESHOLD = float(os.getenv("MODEL_A_IOU_THRESHOLD", 0.3))
+MODEL_B_CONF_THRESHOLD = float(os.getenv("MODEL_B_CONF_THRESHOLD", 0.5))
+MODEL_B_IOU_THRESHOLD = float(os.getenv("MODEL_B_IOU_THRESHOLD", 0.45))
+
+
+# 環境変数からモデルパス取得（デフォルト値あり）
+MODEL_A_PATH = os.getenv("MODEL_A_PATH", "./yolov5s_carplate_detail_ModelA.onnx")
+MODEL_B_PATH = os.getenv("MODEL_B_PATH", "./yolov5s_carplate_ditect_ModelB.onnx")
+
 def load_onnx_model(onnx_path):
     session = ort.InferenceSession(
         onnx_path,
@@ -27,7 +40,8 @@ def load_onnx_model(onnx_path):
     print(f"[INFO] Execution Providers: {session.get_providers()}")
     return session
 
-def detect_plate(session, image, conf_threshold=0.5, iou_threshold=0.45, input_size=(640, 640)):
+def detect_plate(session, image, conf_threshold=MODEL_B_CONF_THRESHOLD,
+                  iou_threshold=MODEL_B_IOU_THRESHOLD, input_size=(640, 640)):
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
 
@@ -42,7 +56,8 @@ def detect_plate(session, image, conf_threshold=0.5, iou_threshold=0.45, input_s
     bboxes = postprocess_plate(outputs, conf_threshold, iou_threshold, scale, pad_x, pad_y)
     return bboxes
 
-def detect_plate_details(session, plate_image, conf_threshold=0.37, iou_threshold=0.3, input_size=(640, 640)):
+def detect_plate_details(session, plate_image, conf_threshold=MODEL_A_CONF_THRESHOLD,
+                          iou_threshold=MODEL_A_IOU_THRESHOLD, input_size=(640, 640)):
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
 
@@ -189,8 +204,12 @@ def get_frame_from_image():
 
 def load_models():
     print("[INFO] Loading models...")
-    sessionB = load_onnx_model(modelB_path)
-    sessionA = load_onnx_model(modelA_path)
+    print(f"[CONFIG] MODEL_B_PATH: {MODEL_B_PATH}")
+    print(f"[CONFIG] MODEL_A_PATH: {MODEL_A_PATH}")
+    print(f"[CONFIG] MODEL_B_CONF_THRESHOLD: {MODEL_B_CONF_THRESHOLD}, MODEL_B_IOU_THRESHOLD: {MODEL_B_IOU_THRESHOLD}")
+    print(f"[CONFIG] MODEL_A_CONF_THRESHOLD: {MODEL_A_CONF_THRESHOLD}, MODEL_A_IOU_THRESHOLD: {MODEL_A_IOU_THRESHOLD}")
+    sessionB = load_onnx_model(MODEL_B_PATH)
+    sessionA = load_onnx_model(MODEL_A_PATH)
     return sessionA, sessionB
 
 #------ USBカメラを使ったストリーム作成モード --------------#
@@ -209,7 +228,10 @@ def camera_loop(sessionA, sessionB):
             print("[WARN] Frame capture failed, skipping...")
             continue
 
+        inference_start = time.time()
         result_frame, _ = process_frame(frame, sessionA, sessionB)
+        inference_time = time.time() - inference_start
+        print(f"[TIME] Total inference time: {inference_time:.3f} sec")
 
         # FPS計算
         curr_time = time.time()
@@ -271,4 +293,5 @@ def main(mode="image"):
         camera_loop(sessionA, sessionB)
 
 if __name__ == "__main__":
-    main(mode="image")
+    main(mode=os.getenv("MODE", "image"))
+
