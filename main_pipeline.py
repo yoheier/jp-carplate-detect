@@ -14,7 +14,7 @@ import numpy as np
 
 
 # パス設定
-image_path = "./MR-2-plate.jpg"
+image_path = "./RX-8_Plate.jpg"
 modelB_path = "./yolov5s_carplate_ditect_ModelB.onnx"
 modelA_path = "./yolov5s_carplate_detail_ModelA.onnx"
 output_dir = Path("./results")
