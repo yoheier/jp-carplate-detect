@@ -1,0 +1,6 @@
+onnxruntime 
+opencv-python
+torch
+torchvision
+numpy==1.24
+Pillow

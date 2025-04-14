@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  jp-carplate-detector-pi5cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 192.168.10.95:5000/jp-carplate-detector-pi5cpu:latest
+    container_name: jp-carplate-detector
+    restart: unless-stopped
+    environment:
+      # モデルパス（コンテナ内のパスに合わせる）
+      MODEL_A_PATH: "/workspace/yolov5s_carplate_detail_ModelA.onnx"
+      MODEL_B_PATH: "/workspace/yolov5s_carplate_ditect_ModelB.onnx"
+
+      # 閾値パラメータ（環境変数で簡単に変更可）
+      MODEL_A_CONF_THRESHOLD: "0.4"
+      MODEL_A_IOU_THRESHOLD: "0.3"
+      MODEL_B_CONF_THRESHOLD: "0.6"
+      MODEL_B_IOU_THRESHOLD: "0.45"
+
+      # OpenMP 設定（CPU 高速化）
+      OMP_NUM_THREADS: "6"
+
+    # 必要に応じてホストからモデル差し替えも可（外部モデルがある場合）
+    # volumes:
+    #   - ./models:/workspace/models
+
+    # USB カメラなどデバイスを使う場合
+    devices:
+      - "/dev/video0:/dev/video0"
+
+    # 必要ならログや結果出力
+    volumes:
+      - ./results:/workspace/results
+
+    # コンソール表示用（オプション）
+    stdin_open: true
+    tty: true
