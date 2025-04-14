@@ -1,4 +1,4 @@
-onnxruntime @ ./onnxruntime-1.22.0-cp311-cp311-linux_aarch64.whl
+onnxruntime 
 opencv-python
 torch
 torchvision
