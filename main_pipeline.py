@@ -11,13 +11,19 @@ from label_definitions import namesA
 
 # パス設定
 image_path = "./RX-8_Plate.jpg"
-modelB_path = "./yolov5s_carplate_ditect_ModelB.onnx"
-modelA_path = "./yolov5s_carplate_detail_ModelA.onnx"
+modelB_path = "./yolov5s_carplate_ditect_ModelB_INT8.onnx"
+modelA_path = "./yolov5s_carplate_detail_ModelA_INT8.onnx"
 output_dir = Path("./results")
 output_dir.mkdir(parents=True, exist_ok=True)
 
 def load_onnx_model(onnx_path):
-    return ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
+    session = ort.InferenceSession(
+        onnx_path,
+        providers=["CPUExecutionProvider"]
+    )
+    print(f"[INFO] Loaded ONNX model: {onnx_path}")
+    print(f"[INFO] Execution Providers: {session.get_providers()}")
+    return session
 
 def detect_plate(session, image, conf_threshold=0.5, iou_threshold=0.45, input_size=(640, 640)):
     input_name = session.get_inputs()[0].name
@@ -76,7 +82,7 @@ def process_frame(frame, sessionA, sessionB):
 
     if not plate_bboxes:
         print("[INFO] No plates detected.")
-        return
+        return frame, plate_text  # ← 修正
 
     for plate_bbox in plate_bboxes:
         x1, y1, x2, y2, _, _ = plate_bbox
@@ -152,6 +158,7 @@ def load_models():
     print("[INFO] Loading models...")
     sessionB = load_onnx_model(modelB_path)
     sessionA = load_onnx_model(modelA_path)
+    print("[INFO] Models loaded successfully.")
     return sessionA, sessionB
 
 #------ USBカメラを使ったストリーム作成モード --------------#
