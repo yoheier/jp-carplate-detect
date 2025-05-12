@@ -1,6 +1,7 @@
 import time
 import os
 
+import argparse
 import cv2
 from pathlib import Path
 import onnxruntime as ort
@@ -14,14 +15,12 @@ import numpy as np
 
 
 # パス設定
-image_path = "./RX-8_Plate.jpg"
-modelB_path = "./yolov5s_carplate_ditect_ModelB.onnx"
-modelA_path = "./yolov5s_carplate_detail_ModelA.onnx"
+
 output_dir = Path("./results")
 output_dir.mkdir(parents=True, exist_ok=True)
 
 # 環境変数からしきい値取得（デフォルト値あり）
-MODEL_A_CONF_THRESHOLD = float(os.getenv("MODEL_A_CONF_THRESHOLD", 0.37))
+MODEL_A_CONF_THRESHOLD = float(os.getenv("MODEL_A_CONF_THRESHOLD", 0.45))
 MODEL_A_IOU_THRESHOLD = float(os.getenv("MODEL_A_IOU_THRESHOLD", 0.3))
 MODEL_B_CONF_THRESHOLD = float(os.getenv("MODEL_B_CONF_THRESHOLD", 0.5))
 MODEL_B_IOU_THRESHOLD = float(os.getenv("MODEL_B_IOU_THRESHOLD", 0.45))
@@ -73,6 +72,33 @@ def detect_plate_details(session, plate_image, conf_threshold=MODEL_A_CONF_THRES
     detections = postprocess_detail(outputs, conf_threshold, iou_threshold, scale, pad_x, pad_y)
     return detections
 
+def warp_bbox_coords(bbox_list, M):
+    """
+    射影変換行列Mをバウンディングボックスに適用し、変換後の座標を返す。
+    bbox_list: [(x1, y1, x2, y2, ...), ...]
+    """
+    warped_bboxes = []
+
+    for bbox in bbox_list:
+        x1, y1, x2, y2 = bbox[:4]
+        points = np.array([
+            [x1, y1],
+            [x2, y1],
+            [x2, y2],
+            [x1, y2]
+        ], dtype=np.float32).reshape(-1, 1, 2)
+        transformed = cv2.perspectiveTransform(points, M).reshape(-1, 2)
+
+        # 変換後の外接矩形に変換
+        x_coords = transformed[:, 0]
+        y_coords = transformed[:, 1]
+        x1n, y1n = np.min(x_coords), np.min(y_coords)
+        x2n, y2n = np.max(x_coords), np.max(y_coords)
+
+        warped_bboxes.append((int(x1n), int(y1n), int(x2n), int(y2n), *bbox[4:]))
+
+    return warped_bboxes
+
 def draw_result(original_image, plate_bbox, plate_details):
     x1, y1, x2, y2, conf, cls = plate_bbox
     # Plate 枠
@@ -92,6 +118,24 @@ def draw_result(original_image, plate_bbox, plate_details):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
     return original_image
 
+def simple_trapezoid_correct(image, x1, y1, x2, y2, out_width=640, out_height=224):
+    top_left     = [x1, y1]
+    top_right    = [x2, y1]
+    bottom_left  = [x1, y2]
+    bottom_right = [x2, y2]
+
+    pts_src = np.array([top_left, top_right, bottom_right, bottom_left], dtype=np.float32)
+    pts_dst = np.array([
+        [0, 0],
+        [out_width - 1, 0],
+        [out_width - 1, out_height - 1],
+        [0, out_height - 1]
+    ], dtype=np.float32)
+
+    M = cv2.getPerspectiveTransform(pts_src, pts_dst)
+    warped = cv2.warpPerspective(image, M, (out_width, out_height))
+    return warped, M
+
 def process_frame(frame, sessionA, sessionB):
     print("[INFO] Detecting plates...")
     plate_text = ""  
@@ -99,11 +143,11 @@ def process_frame(frame, sessionA, sessionB):
 
     if not plate_bboxes:
         print("[INFO] No plates detected.")
-        return
+        return frame, ""
 
     for plate_bbox in plate_bboxes:
         x1, y1, x2, y2, _, _ = plate_bbox
-        plate_crop = frame[y1:y2, x1:x2]
+        plate_crop, M  = simple_trapezoid_correct(frame, x1, y1, x2, y2, out_width=640, out_height=224)
 
         if plate_crop.size == 0:
             print("[WARN] Empty crop, skipping...")
@@ -117,12 +161,8 @@ def process_frame(frame, sessionA, sessionB):
             #continue  # 追加: 詳細がない場合はスキップ
 
         # 座標補正: plate_crop 基準 → 元画像基準
-        adjusted_plate_details = []
-        for detail in plate_details:
-            dx1, dy1, dx2, dy2, conf, cls = detail
-            adjusted_plate_details.append((
-                dx1 + x1, dy1 + y1, dx2 + x1, dy2 + y1, conf, cls
-            ))
+        M_inv = np.linalg.inv(M)
+        adjusted_plate_details = warp_bbox_coords(plate_details, M_inv)
 
         def cluster_and_sort(details):
             if len(details) <= 1:
@@ -163,6 +203,11 @@ def process_frame(frame, sessionA, sessionB):
 
         best_hiragana = select_best_hiragana(adjusted_plate_details, hiragana_class_ids, image_width)
 
+        # debug out
+        for item in sorted_details:
+            print(f"[DEBUG] item: {item}, len:{len(item)}")
+
+
         # 詳細なデバッグ出力
         print("[DEBUG] Plate details after sorting:")
         for idx, (dx1, dy1, dx2, dy2, conf, cls) in enumerate(sorted_details):
@@ -194,14 +239,6 @@ def process_frame(frame, sessionA, sessionB):
         )  
     return frame, plate_text
 
-def get_frame_from_image():
-    # 入力画像
-    original_image = cv2.imread(image_path)
-    if original_image is None:
-        print(f"[ERROR] Failed to load image: {image_path}")
-        return
-    return original_image
-
 def load_models():
     print("[INFO] Loading models...")
     print(f"[CONFIG] MODEL_B_PATH: {MODEL_B_PATH}")
@@ -229,7 +266,7 @@ def camera_loop(sessionA, sessionB):
             continue
 
         inference_start = time.time()
-        result_frame, _ = process_frame(frame, sessionA, sessionB)
+        result_frame = process_frame(frame, sessionA, sessionB)
         inference_time = time.time() - inference_start
         print(f"[TIME] Total inference time: {inference_time:.3f} sec")
 
@@ -253,45 +290,46 @@ def camera_loop(sessionA, sessionB):
     print("[INFO] Camera loop terminated.")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Japanese carplate detection pipeline")
+    parser.add_argument("--mode", choices=["image", "camera"], default="image",
+                        help="Execution mode: image or camera (default: image)")
+    parser.add_argument("--image", type=str, default=None,
+                        help="Path to the input image when in image mode")
+    return parser.parse_args()
 
-def main(mode="image"):
-    total_start_time = time.time()  # 全体処理開始時間
-    # モデルロード
+
+def main(mode: str, image_path: str = None):
+    total_start_time = time.time()
     print("[INFO] Loading models...")
     model_load_start = time.time()
     sessionA, sessionB = load_models()
     model_load_time = time.time() - model_load_start
     print(f"[TIME] Model loading time: {model_load_time:.3f} sec")
 
-    # 入力画像
     if mode == "image":
-        original_image = get_frame_from_image()
+        if not image_path:
+            print("[ERROR] --image オプションで画像パスを指定してください")
+            return
 
-        # 1フレーム処理
-        if original_image is not None:
-            # 推論時間計測
-            inference_start = time.time()
-            result_image, _ = process_frame(original_image, sessionA, sessionB)     
-            inference_time = time.time() - inference_start
-            print(f"[TIME] Total inference time: {inference_time:.3f} sec")
+        original_image = cv2.imread(image_path)
+        if original_image is None:
+            print(f"[ERROR] Failed to load image: {image_path}")
+            return
 
-        # イメージ保存時間計測
-        image_save_start = time.time()
-        output_file = output_dir / f"pipeline_result.jpg"
+        inference_start = time.time()
+        result_image, p_text = process_frame(original_image, sessionA, sessionB)
+        inference_time = time.time() - inference_start
+        print(f"[TIME] Total inference time: {inference_time:.3f} sec")
+
+        output_file = output_dir / "pipeline_result.jpg"
         cv2.imwrite(str(output_file), result_image)
-        image_save_time = time.time() - image_save_start
-        print(f"[TIME] Image save time: {image_save_time:.3f} sec")
-
-        # FPS 風の計算
-        total_processing_time = inference_time + image_save_time
-        estimated_fps = 1.0 / total_processing_time if total_processing_time > 0 else float('inf')
-        print(f"[INFO] Estimated FPS (inference + save): {estimated_fps:.2f} FPS")
-
         print(f"[INFO] Final result saved to {output_file}")
 
     elif mode == "camera":
         camera_loop(sessionA, sessionB)
 
 if __name__ == "__main__":
-    main(mode=os.getenv("MODE", "image"))
+    args = parse_args()
+    main(mode=args.mode, image_path=args.image)
 

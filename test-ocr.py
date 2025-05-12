@@ -9,7 +9,7 @@ import onnxruntime as ort
 from detect_plate_onnx import preprocess as preprocess_plate, postprocess as postprocess_plate
 
 # --- パス設定 ---
-image_path = "./RX-8_Plate.jpg"
+image_path = "./obihiro-test.jpg"
 modelB_path = "./yolov5s_carplate_ditect_ModelB.onnx"
 
 # --- 環境変数からしきい値取得（デフォルト値あり）---
@@ -100,7 +100,7 @@ def ocr_plate_multiline(plate_image):
         # カラーならGRAYSCALE化
         gray = cv2.cvtColor(plate_image, cv2.COLOR_BGR2GRAY)
 
-    config = "--psm 7 --oem 2 -l jpn"
+    config = "--psm 6 --oem 2 -l jpn"
     text = pytesseract.image_to_string(gray, config=config)
     return text
 
@@ -109,7 +109,7 @@ def ocr_with_confidence(img):
     TesseractでOCRし、各行ごとのtextとconfidenceを取得する例。
     """
     # lang='jpn' など、必要に応じて設定
-    config = "--psm 6 --oem 3 -l jpn"
+    config = "--psm 6 --oem 1 -l jpn"
     
     # TSV形式を辞書で取得
     data = pytesseract.image_to_data(img, config=config, output_type=pytesseract.Output.DICT)
